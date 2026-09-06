@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>String Instrument Voicing Prompt Generator</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 20px auto; padding: 20px; background: #f9f9f9; color: #333; }
+        .section { background: #fff; padding: 15px; margin-bottom: 15px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        select, input, textarea { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+        #tuning-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 10px; margin-bottom: 10px; }
+        .tuning-box { background: #f0f0f0; padding: 8px; border-radius: 4px; text-align: center; }
+        .tuning-box label { font-size: 12px; }
+        button { background: #0066cc; color: #fff; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0052a3; }
+        textarea { height: 120px; font-family: monospace; }
+    </style>
+</head>
+<body>
+
+    <h2>弦楽器MIDIボイシング・プロンプト生成</h2>
+
+    <div class="section">
+        <label for="instrument-select">楽器と仕様の選択:</label>
+        <select id="instrument-select" onchange="updateTuningFields()">
+            <optgroup label="4弦楽器">
+                <option value="ukulele_high">ウクレレ (High-G)</option>
+                <option value="ukulele_low">ウクレレ (Low-G)</option>
+                <option value="mandolin">マンドリン</option>
+                <option value="violin">バイオリン</option>
+                <option value="bass4">ベース (4弦)</option>
+            </optgroup>
+            <optgroup label="5弦楽器">
+                <option value="bass5">ベース (5弦)</option>
+                <option value="banjo5">バンジョー (5弦)</option>
+                <option value="ronroco">ロンロコ (5コース)</option>
+                <option value="charango">チャランゴ (5コース)</option>
+            </optgroup>
+            <optgroup label="ギター">
+                <option value="guitar6" selected>ギター (6弦)</option>
+                <option value="guitar7">ギター (7弦)</option>
+                <option value="guitar8">ギター (8弦)</option>
+            </optgroup>
+        </select>
+
+        <label>各弦・コースのチューニング (低音側 → 高音側):</label>
+        <div id="tuning-container"></div>
+    </div>
+
+    <div class="section">
+        <label for="fret-min">フレット範囲 (ポジション制限):</label>
+        <div style="display: flex; gap: 10px;">
+            <select id="fret-min">
+                <option value="0">0 (開放)</option>
+                <option value="1">1フレット</option>
+                <option value="2">2フレット</option>
+                <option value="3" selected>3フレット</option>
+                <option value="5">5フレット</option>
+                <option value="7">7フレット</option>
+            </select>
+            <span style="align-self: center;">〜</span>
+            <select id="fret-max">
+                <option value="3">3フレット</option>
+                <option value="5" selected>5フレット</option>
+                <option value="7">7フレット</option>
+                <option value="12">12フレット</option>
+                <option value="24">24フレット</option>
+            </select>
+        </div>
+
+        <label for="midi-input">変換したいMIDIコード/ノート情報:</label>
+        <textarea id="midi-input" placeholder="例: Cmaj7 (C E G B), またはMIDIノート番号の羅列"></textarea>
+
+        <button onclick="generatePrompt()">AI用プロンプトを生成してコピー</button>
+    </div>
+
+    <div class="section">
+        <label for="output-prompt">生成されたプロンプト:</label>
+        <textarea id="output-prompt" readonly placeholder="ここにプロンプトが出力されます"></textarea>
+    </div>
+
+<script>
+const noteOptions = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+const instrumentPresets = {
+    "ukulele_high": ["G4", "C4", "E4", "A4"],
+    "ukulele_low":  ["G3", "C4", "E4", "A4"],
+    "mandolin":     ["G3", "D4", "A4", "E5"],
+    "violin":       ["G3", "D4", "A4", "E5"],
+    "bass4":        ["E1", "A1", "D2", "G2"],
+    "bass5":        ["B0", "E1", "A1", "D2", "G2"],
+    "banjo5":       ["G4", "D3", "G3", "B3", "D4"],
+    "ronroco":      ["E3", "A3", "E4", "C4", "G4"],
+    "charango":     ["G4", "C4", "E4", "A4", "E4"],
+    "guitar6":      ["E2", "A2", "D3", "G3", "B3", "E4"],
+    "guitar7":      ["B1", "E2", "A2", "D3", "G3", "B3", "E4"],
+    "guitar8":      ["F#1", "B1", "E2", "A2", "D3", "G3", "B3", "E4"]
+};
+
+function updateTuningFields() {
+    const instrument = document.getElementById("instrument-select").value;
+    const container = document.getElementById("tuning-container");
+    container.innerHTML = "";
+    
+    const defaults = instrumentPresets[instrument] || [];
+
+    defaults.forEach((defaultVal, i) => {
+        const box = document.createElement("div");
+        box.className = "tuning-box";
+        
+        const label = document.createElement("label");
+        label.innerText = `${i + 1}弦/コース`;
+        
+        const select = document.createElement("select");
+        select.className = "tuning-select";
+        
+        noteOptions.forEach(note => {
+            for(let octave = 0; octave <= 5; octave++) {
+                const optName = note + octave;
+                const opt = document.createElement("option");
+                opt.value = optName;
+                opt.innerText = optName;
+                if(defaultVal === optName) {
+                    opt.selected = true;
+                }
+                select.appendChild(opt);
+            }
+        });
+        
+        if (!select.value && defaultVal) {
+            const opt = document.createElement("option");
+            opt.value = defaultVal;
+            opt.innerText = defaultVal;
+            opt.selected = true;
+            select.appendChild(opt);
+        }
+
+        box.appendChild(label);
+        box.appendChild(select);
+        container.appendChild(box);
+    });
+}
+
+function generatePrompt() {
+    const instrumentSelect = document.getElementById("instrument-select");
+    const instrumentName = instrumentSelect.options[instrumentSelect.selectedIndex].text;
+    const tuningSelects = document.querySelectorAll(".tuning-select");
+    const tunings = Array.from(tuningSelects).map(s => s.value);
+    
+    const fretMin = document.getElementById("fret-min").value;
+    const fretMax = document.getElementById("fret-max").value;
+    const midiInput = document.getElementById("midi-input").value;
+
+    const prompt = `以下の条件に従って、入力されたMIDIデータを指定された楽器の押弦フォーム（ボイシング）に変換してください。出力はMIDIデータのみとし、説明や解説、タブ譜などのテキストは一切含めないでください。
+
+【楽器設定】
+- 楽器・仕様: ${instrumentName}
+- チューニング (低音弦/コース側 → 高音弦/コース側): ${tunings.join(", ")}
+- 許可フレット範囲: ${fretMin}フレット 〜 ${fretMax}フレットの間で物理的に押弦可能な形に収めること。
+
+【変換対象データ】
+${midiInput}`;
+
+    const output = document.getElementById("output-prompt");
+    output.value = prompt;
+    output.select();
+    navigator.clipboard.writeText(prompt);
+    alert("プロンプトをクリップボードにコピーしました！");
+}
+
+updateTuningFields();
+</script>
+
+</body>
+</html>
